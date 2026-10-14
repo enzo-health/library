@@ -1,40 +1,35 @@
 "use client"
 
-import { useInterval } from "ahooks"
 import { getDeploymentVersionMetadata } from "library/deploymentVersion"
-import { browserData } from "library/deviceDetection"
 import TypedEventEmitter from "library/TypedEventEmitter"
-import { useHMR } from "library/useHMR"
+import dynamic from "next/dynamic"
 import { usePathname, useRouter } from "next/navigation"
-import { stegaClean } from "next-sanity"
-import { useVisualEditingEnvironment } from "next-sanity/hooks"
-import { VisualEditing } from "next-sanity/visual-editing"
-import type { ComponentProps, ReactNode } from "react"
+import type { ReactNode } from "react"
 import { useEffect, useState, useTransition } from "react"
 import { studioUrl } from "sanity/lib/api"
 import { Toaster, toast } from "sonner"
-import { disableDraftMode } from "./disableDraftMode"
-import { type LiveProxyEvent, liveProxyEventSchema } from "./liveProxyEvents"
+import type { LiveProxyEvent } from "./liveProxyEvents"
 
 const sanityLiveRefreshEvents = new TypedEventEmitter<{ refresh: [] }>()
 const liveProxyReconnectDelayMs = 250
 
+/**
+ * the proxy event schema is zod-based; it is loaded with the proxy connection
+ * so zod stays out of the production client bundle (module level because the
+ * React Compiler cannot lower an import() inside a hook)
+ */
+const loadLiveProxyEventSchema = () =>
+	import("./liveProxyEvents").then((module) => module.liveProxyEventSchema)
+
+/**
+ * the visual editing overlay and preview toast pull in @sanity/visual-editing
+ * and @sanity/ui, so they only load in draft mode or inside an iframe
+ */
+const DraftModeTools = dynamic(() => import("./live.draft"), { ssr: false })
+
 export async function notifySanityLiveRefreshAction() {
 	sanityLiveRefreshEvents.dispatchEvent("refresh")
 	return "refresh" as const
-}
-
-const isPresentationEnvironment = (
-	environment: ReturnType<typeof useVisualEditingEnvironment>,
-) =>
-	environment === "presentation-iframe" || environment === "presentation-window"
-
-function parseLiveProxyEvent(data: string): LiveProxyEvent | null {
-	try {
-		return liveProxyEventSchema.parse(JSON.parse(data))
-	} catch {
-		return null
-	}
 }
 
 function notifyDeploymentUpdate({
@@ -58,6 +53,19 @@ function notifyDeploymentUpdate({
 	})
 }
 
+/**
+ * the presentation tool renders the site in an iframe before draft mode is
+ * necessarily enabled; that is the one case the preview toast is needed
+ * outside draft mode
+ */
+const useIsEmbedded = () => {
+	const [isEmbedded, setIsEmbedded] = useState(false)
+	useEffect(() => {
+		setIsEmbedded(window.self !== window.top)
+	}, [])
+	return isEmbedded
+}
+
 export function RuntimeClient({
 	children,
 	isDraftMode,
@@ -69,8 +77,7 @@ export function RuntimeClient({
 }) {
 	const pathname = usePathname()
 	const isStudio = pathname.startsWith(studioUrl)
-	const environment = useVisualEditingEnvironment()
-	const isPresentation = isPresentationEnvironment(environment)
+	const isEmbedded = useIsEmbedded()
 
 	if (isStudio) {
 		return (
@@ -94,12 +101,9 @@ export function RuntimeClient({
 				/>
 			)}
 			{children}
-			<SanityPreviewStatusToast
-				isDraftMode={isDraftMode}
-				isPresentation={isPresentation}
-			/>
-			<SanityVisualEditingOverlay isDraftMode={isDraftMode} />
-			{isDraftMode && <FirefoxFix />}
+			{(isDraftMode || isEmbedded) && (
+				<DraftModeTools isDraftMode={isDraftMode} />
+			)}
 		</>
 	)
 }
@@ -122,10 +126,7 @@ export function SanityRuntimeRefresh({
 		let reconnectTimer: ReturnType<typeof setTimeout> | undefined
 		let isDisposed = false
 
-		const handleMessage = (e: MessageEvent<string>) => {
-			const event = parseLiveProxyEvent(e.data)
-			if (!event) return
-
+		const handleEvent = (event: LiveProxyEvent) => {
 			if (event.type === "connected") {
 				notifyDeploymentUpdate({ liveDeployment: event.deployment })
 				return
@@ -142,19 +143,34 @@ export function SanityRuntimeRefresh({
 			event satisfies never
 		}
 
-		const connect = () => {
+		void loadLiveProxyEventSchema().then((liveProxyEventSchema) => {
 			if (isDisposed) return
 
-			eventSource?.close()
-			eventSource = new EventSource("/api/live")
-			eventSource.onmessage = handleMessage
-			eventSource.addEventListener("reconnect", () => {
-				eventSource?.close()
-				reconnectTimer = setTimeout(connect, liveProxyReconnectDelayMs)
-			})
-		}
+			const handleMessage = (e: MessageEvent<string>) => {
+				const parsed = liveProxyEventSchema.safeParse(JSON.parse(e.data))
+				if (parsed.success) handleEvent(parsed.data)
+			}
 
-		connect()
+			const connect = () => {
+				if (isDisposed) return
+
+				eventSource?.close()
+				eventSource = new EventSource("/api/live")
+				eventSource.onmessage = (e) => {
+					try {
+						handleMessage(e)
+					} catch {
+						// ignore malformed messages
+					}
+				}
+				eventSource.addEventListener("reconnect", () => {
+					eventSource?.close()
+					reconnectTimer = setTimeout(connect, liveProxyReconnectDelayMs)
+				})
+			}
+
+			connect()
+		})
 
 		return () => {
 			isDisposed = true
@@ -187,114 +203,6 @@ export function SanityRuntimeRefresh({
 			toast.dismiss(toastId)
 		}
 	}, [pending, showRefreshToast])
-
-	return null
-}
-
-export function SanityPreviewStatusToast({
-	isDraftMode,
-	isPresentation,
-}: {
-	isDraftMode: boolean
-	isPresentation: boolean
-}) {
-	const router = useRouter()
-	const [pending, startTransition] = useTransition()
-
-	useEffect(() => {
-		if (!isPresentation && !isDraftMode) return
-
-		const toastId = toast(
-			isDraftMode ? "Viewing Drafted Content" : "Viewing Published Content",
-			{
-				duration: !isDraftMode && isPresentation ? Infinity : undefined,
-				action:
-					isDraftMode && !isPresentation
-						? {
-								label: "Disable",
-								onClick: async () => {
-									await disableDraftMode()
-									startTransition(() => {
-										router.refresh()
-									})
-								},
-							}
-						: undefined,
-			},
-		)
-
-		return () => {
-			toast.dismiss(toastId)
-		}
-	}, [isDraftMode, isPresentation, router])
-
-	useEffect(() => {
-		if (pending) {
-			const toastId = toast.loading("Disabling draft mode...")
-			return () => {
-				toast.dismiss(toastId)
-			}
-		}
-	}, [pending])
-
-	return null
-}
-
-export function SanityVisualEditingOverlay({
-	isDraftMode,
-	...props
-}: ComponentProps<typeof VisualEditing> & {
-	isDraftMode: boolean
-}) {
-	if (!isDraftMode) return null
-
-	return <VisualEditing {...props} />
-}
-
-let hasWarned = false
-
-// biome-ignore lint/suspicious/noMisleadingCharacterClass: directly copied from sanity
-const zeroWidthChars = /[\u200B\u200C\u200D\uFEFF]/g
-
-const checkZeroWidthChars = (startNode: Node = document.body) => {
-	const walk = (node: Node) => {
-		if (window.lenisInstance?.isScrolling) return
-
-		if (node.nodeType === Node.TEXT_NODE) {
-			const parent = node.parentElement
-			const hasStega = zeroWidthChars.test(node.textContent ?? "")
-
-			if (parent && hasStega) {
-				const computedStyle = getComputedStyle(parent)
-				const letterSpacing = parseFloat(computedStyle.letterSpacing)
-
-				if (letterSpacing !== 0) {
-					const cleanContent = stegaClean(node.textContent ?? "")
-					node.textContent = cleanContent
-
-					if (!hasWarned) {
-						hasWarned = true
-						toast.info("Some draft mode features are disabled in Firefox")
-					}
-				}
-			}
-		} else {
-			node.childNodes.forEach(walk)
-		}
-	}
-
-	walk(startNode)
-}
-
-export const FirefoxFix = () => {
-	useInterval(() => {
-		if (browserData.isFireFox) checkZeroWidthChars()
-	}, 1000)
-	useHMR("afterRefresh", () => {
-		if (browserData.isFireFox) {
-			checkZeroWidthChars()
-		}
-	})
 
 	return null
 }

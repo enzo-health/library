@@ -5,8 +5,13 @@ import type { VideoField } from "library/sanity/assetMetadata"
 import { css, f, styled } from "library/styled"
 import { useCombinedRefs } from "library/useCombinedRefs"
 import { stegaClean } from "next-sanity"
-import { useRef } from "react"
-import ReactPlayer from "react-player"
+import { lazy, Suspense, useRef } from "react"
+
+/**
+ * react-player drags the Mux and HLS players into whatever bundle imports it,
+ * so it only loads once a video actually mounts (the component is client-only anyway)
+ */
+const ReactPlayer = lazy(() => import("react-player"))
 
 type VideoEmbedProps = Omit<
 	React.ComponentPropsWithoutRef<typeof ReactPlayer>,
@@ -53,26 +58,29 @@ export function VideoEmbed({
 	return (
 		<ClientOnly>
 			<Embed className={className}>
-				<ReactPlayer
-					ref={combinedRef}
-					src={src}
-					width="100%"
-					height="100%"
-					controls={controls}
-					playsInline
-					onPlay={
-						resetOnPlay
-							? (e) => {
-									const el = internalRef.current
-									if (el && el.currentTime > 0.1) {
-										el.currentTime = 0
+				{/* keeps the player chunk from suspending anything above the embed */}
+				<Suspense fallback={null}>
+					<ReactPlayer
+						ref={combinedRef}
+						src={src}
+						width="100%"
+						height="100%"
+						controls={controls}
+						playsInline
+						onPlay={
+							resetOnPlay
+								? (e) => {
+										const el = internalRef.current
+										if (el && el.currentTime > 0.1) {
+											el.currentTime = 0
+										}
+										onPlay?.(e)
 									}
-									onPlay?.(e)
-								}
-							: onPlay
-					}
-					{...props}
-				/>
+								: onPlay
+						}
+						{...props}
+					/>
+				</Suspense>
 			</Embed>
 		</ClientOnly>
 	)

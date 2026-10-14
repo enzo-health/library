@@ -1,4 +1,3 @@
-import { dispatcher } from "next/dist/compiled/next-devtools"
 import type { Dispatcher } from "next/dist/next-devtools/dev-overlay.browser"
 import { useServerInsertedHTML } from "next/navigation"
 import {
@@ -12,7 +11,6 @@ import {
 import { isBrowser } from "./deviceDetection"
 import TypedEventEmitter from "./TypedEventEmitter"
 
-const nextDispatcher = dispatcher as Dispatcher
 const js = String.raw
 
 let hmrMessageId = 0
@@ -33,14 +31,20 @@ declare global {
 	}
 }
 
-if (isBrowser) {
+// the devtools dispatcher is only imported in development; a static import
+// would ship next-devtools (and its own copies of react-dom and zod) to production
+if (isBrowser && process.env.NODE_ENV === "development") {
 	window.__reformHMREmitter = emitter
 	window.__reformHMRCreateId = createHMRMessageId
-	const previousOnBeforeRefresh = nextDispatcher.onBeforeRefresh
-	nextDispatcher.onBeforeRefresh = () => {
-		previousOnBeforeRefresh()
-		emitter.dispatchEvent("beforeRefresh", createHMRMessageId())
-	}
+	void import("next/dist/compiled/next-devtools").then(({ dispatcher }) => {
+		const nextDispatcher = dispatcher as Dispatcher
+		const previousOnBeforeRefresh =
+			nextDispatcher.onBeforeRefresh.bind(nextDispatcher)
+		nextDispatcher.onBeforeRefresh = () => {
+			previousOnBeforeRefresh()
+			emitter.dispatchEvent("beforeRefresh", createHMRMessageId())
+		}
+	})
 }
 
 const HMRContext = createContext(false)
