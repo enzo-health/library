@@ -92,7 +92,7 @@ function SanityPreviewStatusToast({
 
 let hasWarned = false
 
-const zeroWidthChars = /\u200B|\u200C|\u200D|\uFEFF/g
+const zeroWidthChars = /\u200B|\u200C|\u200D|\uFEFF/
 
 const checkZeroWidthChars = (startNode: Node = document.body) => {
 	const walk = (node: Node) => {

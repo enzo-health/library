@@ -54,14 +54,14 @@ function notifyDeploymentUpdate({
 }
 
 /**
- * the presentation tool renders the site in an iframe before draft mode is
- * necessarily enabled; that is the one case the preview toast is needed
- * outside draft mode
+ * the presentation tool renders the site in an iframe (or a window it opened)
+ * before draft mode is necessarily enabled; that is the one case the preview
+ * toast is needed outside draft mode
  */
 const useIsEmbedded = () => {
 	const [isEmbedded, setIsEmbedded] = useState(false)
 	useEffect(() => {
-		setIsEmbedded(window.self !== window.top)
+		setIsEmbedded(window.self !== window.top || window.opener !== null)
 	}, [])
 	return isEmbedded
 }
@@ -143,34 +143,48 @@ export function SanityRuntimeRefresh({
 			event satisfies never
 		}
 
-		void loadLiveProxyEventSchema().then((liveProxyEventSchema) => {
-			if (isDisposed) return
+		const start = () => {
+			void loadLiveProxyEventSchema().then(
+				(liveProxyEventSchema) => {
+					if (isDisposed) return
 
-			const handleMessage = (e: MessageEvent<string>) => {
-				const parsed = liveProxyEventSchema.safeParse(JSON.parse(e.data))
-				if (parsed.success) handleEvent(parsed.data)
-			}
-
-			const connect = () => {
-				if (isDisposed) return
-
-				eventSource?.close()
-				eventSource = new EventSource("/api/live")
-				eventSource.onmessage = (e) => {
-					try {
-						handleMessage(e)
-					} catch {
-						// ignore malformed messages
+					const parseLiveProxyEvent = (data: string): LiveProxyEvent | null => {
+						let json: unknown
+						try {
+							json = JSON.parse(data)
+						} catch {
+							return null
+						}
+						const parsed = liveProxyEventSchema.safeParse(json)
+						return parsed.success ? parsed.data : null
 					}
-				}
-				eventSource.addEventListener("reconnect", () => {
-					eventSource?.close()
-					reconnectTimer = setTimeout(connect, liveProxyReconnectDelayMs)
-				})
-			}
 
-			connect()
-		})
+					const connect = () => {
+						if (isDisposed) return
+
+						eventSource?.close()
+						eventSource = new EventSource("/api/live")
+						eventSource.onmessage = (e: MessageEvent<string>) => {
+							const event = parseLiveProxyEvent(e.data)
+							if (event) handleEvent(event)
+						}
+						eventSource.addEventListener("reconnect", () => {
+							eventSource?.close()
+							reconnectTimer = setTimeout(connect, liveProxyReconnectDelayMs)
+						})
+					}
+
+					connect()
+				},
+				() => {
+					// the schema chunk failed to load (network); try again like a dropped connection
+					if (!isDisposed)
+						reconnectTimer = setTimeout(start, liveProxyReconnectDelayMs)
+				},
+			)
+		}
+
+		start()
 
 		return () => {
 			isDisposed = true
