@@ -13,18 +13,12 @@ import type { LiveProxyEvent } from "./liveProxyEvents"
 const sanityLiveRefreshEvents = new TypedEventEmitter<{ refresh: [] }>()
 const liveProxyReconnectDelayMs = 250
 
-/**
- * the proxy event schema is zod-based; it is loaded with the proxy connection
- * so zod stays out of the production client bundle (module level because the
- * React Compiler cannot lower an import() inside a hook)
- */
+// loaded with the proxy connection so zod stays out of the production bundle
+// (module level: the React Compiler can't lower import() inside a hook)
 const loadLiveProxyEventSchema = () =>
 	import("./liveProxyEvents").then((module) => module.liveProxyEventSchema)
 
-/**
- * the visual editing overlay and preview toast pull in @sanity/visual-editing
- * and @sanity/ui, so they only load in draft mode or inside an iframe
- */
+// pulls in @sanity/visual-editing and @sanity/ui; only loaded in draft mode or the presentation tool
 const DraftModeTools = dynamic(() => import("./live.draft"), { ssr: false })
 
 export async function notifySanityLiveRefreshAction() {
@@ -53,11 +47,7 @@ function notifyDeploymentUpdate({
 	})
 }
 
-/**
- * the presentation tool renders the site in an iframe (or a window it opened)
- * before draft mode is necessarily enabled; that is the one case the preview
- * toast is needed outside draft mode
- */
+// the presentation tool shows the site in an iframe or popup before draft mode is enabled
 const useIsEmbedded = () => {
 	const [isEmbedded, setIsEmbedded] = useState(false)
 	useEffect(() => {
@@ -177,7 +167,7 @@ export function SanityRuntimeRefresh({
 					connect()
 				},
 				() => {
-					// the schema chunk failed to load (network); try again like a dropped connection
+					// chunk failed to load; retry like a dropped connection
 					if (!isDisposed)
 						reconnectTimer = setTimeout(start, liveProxyReconnectDelayMs)
 				},

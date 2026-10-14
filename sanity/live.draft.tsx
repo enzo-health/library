@@ -11,14 +11,8 @@ import { useEffect, useTransition } from "react"
 import { toast } from "sonner"
 import { disableDraftMode } from "./disableDraftMode"
 
-/**
- * draft mode UI: the visual editing overlay and the preview status toast
- *
- * loaded lazily by `RuntimeClient`, only in draft mode or inside an iframe
- * (the presentation tool), because `next-sanity/hooks` and
- * `next-sanity/visual-editing` bring all of @sanity/visual-editing and
- * @sanity/ui with them
- */
+// draft-mode UI (visual editing overlay, preview toast). Loaded lazily by
+// RuntimeClient: next-sanity/visual-editing brings all of @sanity/ui with it.
 export default function DraftModeTools({
 	isDraftMode,
 }: {

@@ -7,10 +7,7 @@ import { useCombinedRefs } from "library/useCombinedRefs"
 import { stegaClean } from "next-sanity"
 import { lazy, Suspense, useRef } from "react"
 
-/**
- * react-player drags the Mux and HLS players into whatever bundle imports it,
- * so it only loads once a video actually mounts (the component is client-only anyway)
- */
+// react-player pulls in the Mux and HLS players, so it only loads when a video mounts
 const ReactPlayer = lazy(() => import("react-player"))
 
 type VideoEmbedProps = Omit<
@@ -58,7 +55,7 @@ export function VideoEmbed({
 	return (
 		<ClientOnly>
 			<Embed className={className}>
-				{/* keeps the player chunk from suspending anything above the embed */}
+				{/* so the lazy player can't suspend the preloader */}
 				<Suspense fallback={null}>
 					<ReactPlayer
 						ref={combinedRef}

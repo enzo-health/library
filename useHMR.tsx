@@ -31,8 +31,7 @@ declare global {
 	}
 }
 
-// the devtools dispatcher is only imported in development; a static import
-// would ship next-devtools (and its own copies of react-dom and zod) to production
+// dev-only import: a static one ships next-devtools to production
 if (isBrowser && process.env.NODE_ENV === "development") {
 	window.__reformHMREmitter = emitter
 	window.__reformHMRCreateId = createHMRMessageId
