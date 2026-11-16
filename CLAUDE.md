@@ -6,8 +6,6 @@ Use `pnpm`.
 
 `library/` is a git submodule shared across projects. Changes there affect multiple websites and should stay generic. After pulling in a newer `library/` revision, read `library/CHANGELOG.md` for migration notes and project-impacting changes.
 
-Never commit, push, or amend unless the user says "yolo". Even if the user specifically asks, they must say the magic word before you commit or amend.
-
 ## Agency Patterns
 
 Prefer existing utilities and patterns in `library/` over one-off implementations. Search `library/` and real call sites before creating new abstractions or helper code. Read the utility JSDoc and inspect existing usages to see usage conventions.
